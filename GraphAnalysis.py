@@ -11,8 +11,12 @@ This file houses graph analysis functions.
 import torch
 import networkx as nx
 from torch_geometric.utils.convert import to_networkx, from_networkx
+from torch_geometric.utils import degree
+from torch_geometric.transforms import RootedEgoNets
 import matplotlib.pyplot as plt 
-
+import math
+import copy
+import numpy as np
 import random as r
 import time 
 
@@ -123,7 +127,7 @@ def better_version_of_calculate_curve_scores(data, node_list = None, starter_pro
     if node_list == None:
         #This returns an EdgeScoreOrganizer
         eso = better_calcuate_curvature(g, final_product)
-        
+        # eso = torch_calculate_curvature(data)
         return eso
     
     else:   #There is a node list
@@ -613,6 +617,51 @@ def calculate_curvature_from_edges(data, pickle_file):
     if type(node_list) == torch.Tensor:
         node_list = node_list.tolist()
 
+def extract_ego_graph(edge_index, ego, hops):
+    to_return = [[],[]]
+    i = 0
+    hop_stack = [ego]
+    search_stack = []
+    visited = []
+    while i < hops:
+        search_stack.extend(hop_stack)
+        hop_stack = []
+        while(len(search_stack) > 0):
+            topic = search_stack[0]
+            search_stack.pop(0)
+            
+            idxes = torch.cat( (torch.where(edge_index[0] == topic)[0], torch.where(edge_index[1] == topic)[0]) ).unique()
+            neighbors = edge_index[:, idxes].unique()
+            visited.append(topic)
+            
+            for x in neighbors:
+                x = x.item()
+                if not x in visited:
+                    hop_stack.append(x)
+                    
+        # hop_stack = neighbors
+        i += 1
+    return torch.tensor(to_return)
+    
+def torch_calculate_curvature(G ):
+    edge_list = G.edge_index
+    degrees = degree(G.edge_index[0])   #Double check this.
+    # ego_finder = RootedEgoNets(4)
+    # egos = ego_finder.extract(G)
+    
+    for edge in zip(edge_list.t()):
+        edge = edge[0]
+        src, dst = edge[0].item(), edge[1].item()
+        
+        ds = degrees[src]
+        dd = degrees[dst]
+    
+        if min(ds,dd).item() == 1:
+            return 0
+        else:
+            ego = extract_ego_graph(G.edge_index, src, 4)  
+            pass
+    
 ##This version will alway returns an EdgeScoreOrganizer object. 
 def better_calcuate_curvature(G, previous_scores = None, focus_edge=None, be_verbose=False, force_recalculate=False):
     def sub_function(G, edge):
@@ -1020,7 +1069,337 @@ def full_graph_manipulation(data, additions, removals, node_dic):
         data.val_mask = torch.cat( (data.val_mask, ss) )
     return data
 
-
+def graph_analysis_func(data, data_as_graph, curve_scores, node_organizer, one_hop_list, psuedo_labeler, thresh = 2, visualize = False, homo_stats=None, can_add=True, can_remove=True):
+    #Divide edges based on curvature
+    add_list = []
+    remove_list = []
+    edges_added = 0
+    edges_removed = 0
+    decoder = {'added':[], 'removed':[]}
+    value_stats = []
+    
+    #Find curve limit
+    for value in curve_scores.score_dic.values():
+        if value > 1:
+            value_stats.append(value)
+   
+    value_stats = np.array(value_stats)
+     
+    mv = value_stats.mean() #sum(value_stats) / len(value_stats)
+    std = value_stats.std()
+    print(f'Mean curvature is {mv} + {std}')
+     
+    for key, value in curve_scores.score_dic.items():
+        if value < 5:
+            add_list.append(key)
+        elif value > mv:
+            # value_stats.append(value)
+            remove_list.append(key)
+        #Iterate through curve_scores.
+   
+    # exit()
+    
+    #Find homophily ratio around bottlenecks and curved edges.
+    
+    def local_homo_calc(lst):
+        curve_homo_ratio = {}    
+        for edge in lst:
+            #Get 1 hop neighborhood from graph object.
+            for nd in edge:
+                if not nd in curve_homo_ratio: 
+                    nhood = nx.ego_graph(data_as_graph, nd, 2)
+                    
+                    #Determine local homophily ratio.
+                    target = data.y[nd].item()  #This is the truth for homophily.
+                    homos = 0 
+                    counter = 0
+                    for nber in list(nhood.nodes()):
+                        if data.y[nber].item() == target:
+                            homos += 1
+                        counter += 1
+                    
+                    curve_homo_ratio[nd] = (homos, homos / counter)     #Homo in 1-hop, ratio in 1-hop
+        return curve_homo_ratio
+    
+    def edge_homo_calc(lst):
+        edge_homo = []
+        for edge in lst:
+            src, dst = edge
+            if data.y[src].item() == data.y[dst].item():
+                edge_homo.append(1)
+            else:
+                edge_homo.append(0)
+                
+                
+        homos = sum(edge_homo)
+        count = len(edge_homo)
+        del(edge_homo)
+        return homos, homos/count
+    
+    add_homo_dic = local_homo_calc(add_list)
+    remove_homo_dic = local_homo_calc(remove_list)
+    to_add = []
+    for k, v in add_homo_dic.items():
+        to_add.append(v[1])
+        
+    to_rem = []
+    for k, v in remove_homo_dic.items():
+        to_rem.append(v[1])
+        
+       
+    plt.hist(to_add)
+    plt.title("Homo ratio or curved sections of the graph")
+    plt.show()
+    
+    plt.hist(to_rem)
+    plt.title("Homo ratio or bottleneced sections of the graph")
+    plt.show()
+    
+    add_homo = edge_homo_calc(add_list)
+    rem_homo = edge_homo_calc(remove_list)
+    
+    print(f'Add ratio {add_homo}, remove ratio {rem_homo}')
+    exit
+    mean_sim = node_organizer.get_median_score()
+    stddev = node_organizer.get_stddev()
+    sim_thresh = mean_sim
+    endpos = len(add_list) + len(remove_list)
+    compressed_list = []
+    
+def run_rewire(args, data, data_as_graph, curve_scores, node_organizer, one_hop_list, psuedo_labeler, thresh = 2, visualize = False, homo_stats=None, can_add=True, can_remove=True):
+    #Divide edges based on curvature
+    add_list = []
+    remove_list = []
+    edges_added = 0
+    edges_removed = 0
+    decoder = {'added':[], 'removed':[]}
+    value_stats = []
+    
+    #Find curve limit
+    for value in curve_scores.score_dic.values():
+        if value > 1:
+            value_stats.append(value)
+   
+    value_stats = np.array(value_stats)
+     
+    mv = value_stats.mean() #sum(value_stats) / len(value_stats)
+    std = value_stats.std()
+    print(f'Mean curvature is {mv} + {std}')
+     
+    for key, value in curve_scores.score_dic.items():
+        if value < 5:
+            add_list.append(key)
+        elif value > mv:
+            # value_stats.append(value)
+            remove_list.append(key)
+        #Iterate through curve_scores.
+   
+    # exit()
+    
+    if args.thresh_type == 'median':
+        mean_sim = node_organizer.get_median_score()
+    elif args.thresh_type == 'mean':
+        mean_sim = node_organizer.get_mean_score()
+        
+    stddev = node_organizer.get_stddev()
+    sim_thresh = mean_sim
+    endpos = len(add_list) + len(remove_list)
+    compressed_list = []
+    for c in add_list:
+        x, y = c
+        compressed_list.append(x)
+        compressed_list.append(y)
+        
+    compressed_list = list(set(compressed_list))
+    # for ttt, e in enumerate(compressed_list):   #Add list needs to be reduced 
+    #     if math.floor( ttt/endpos * 100) % 10 == 0:
+    #         print(f'{ttt} of {endpos}, addlist is {len(add_list)} node is {e}')
+    #     # mean_sim = node_organizer.get_median_score() + 2 * stddev
+    #     # print(edge)
+    #     #Will need this
+    #     score_dic = psuedo_labeler.set_scores_about_a_node(e, data)
+    #     for k , v in score_dic.items():
+    #         # if  182 in k:
+    #             # print("182 right here????")
+    #         node_organizer.add_score( k,v )
+    #     # for yyy, e in enumerate(edge):
+    #     #     #Check organizer to see if the calculation has already been done.
+    #     #     if not node_organizer.has_node_been_explored(e):
+                
+    #     #         # for n in range(data.x.shape[0]):
+    #     #             # if not n == e:
+    #     #                 #Calc cosinesim, add to dictionary. This is edge indexed.
+    #     #         score_dic = psuedo_labeler.set_scores_about_a_node(e, data)
+    #     #         for k , v in score_dic.items():
+    #     #             node_organizer.add_score( k,v )
+    #     #                 # node_organizer.add_score( (e, n), torch.nn.functional.cosine_similarity(data.x[e], data.x[n], dim=0).item())
+    #     #                 # sim_scores[(e,n)] = torch.nn.functional.cosine_similarity(data.x[e], data.x[n], dim=0).item()
+    #     #     ###End score update    
+    #     #     #Need most similar edge.
+            
+    #     #     elif not node_organizer.has_node_been_full_explored(e, data):
+    #     #         score_dic = psuedo_labeler.set_scores_about_a_node(e, data)
+    #     #         for k , v in score_dic.items():
+    #     #             node_organizer.add_score( k,v )    
+    #     ##########
+    #     # e1 = node_organizer.get_most_similar_node_to(edge[0])
+    #     # e2 = node_organizer.get_most_similar_node_to(edge[1])
+        
+    #     # #Compare values
+    #     # if e1[1] > e2[1]:
+    #     #     candi`date_edge = (edge[0], e1[0])
+    #     # else:
+    #     #     candidate_edge = (edge[1], e2[0])
+    #     # # candidate_edge = edge
+        #############
+    bn_breaks = 0
+    ender = len(add_list)
+    for ttt, edge in enumerate(add_list):
+        if ttt % 100 == 0:
+            print(f'{ttt} of {ender} in 2nd go.')
+        if not node_organizer.has_node_been_explored(edge[0]):
+            print(f'Exploring {edge[0]}')
+            score_dic = psuedo_labeler.set_scores_about_a_node(edge[0], data)
+            for k , v in score_dic.items():
+                node_organizer.add_score( k,v )
+        e1 = node_organizer.get_most_similar_node_to(edge[0])[0]
+        
+        if not node_organizer.has_node_been_explored(edge[1]):
+            print(f'Exploring {edge[1]}')
+            score_dic = psuedo_labeler.set_scores_about_a_node(edge[1], data)
+            for k , v in score_dic.items():
+                node_organizer.add_score( k,v )
+        e2 = node_organizer.get_most_similar_node_to(edge[1])[0]
+        try:
+            bn_score = node_organizer.get_score(edge)
+        except:
+            print(f'{edge} not present in node score organizer.!!!!')        
+            bn_score = psuedo_labeler.calculate_score_for_single_edges(edge[0], edge[1], data)
+        # candidate_edge = (edge[0], e1[0])
+        # #Compare values
+        # if e1[1] > e2[1]:
+        #     candidate_edges = [(edge[0], e1[0])]
+        # else:
+        #     candidate_edges = [(edge[1], e2[0])]
+        should_break = False
+        new_edge = False
+        score_pair = []
+        for candidate_edge in [(edge[0], e1), (edge[1], e2)]:
+            # sim_thresh = r.uniform(mean_sim, 1)
+            sim_thresh = mean_sim
+            sim_measure = psuedo_labeler.calculate_score_for_single_edges(candidate_edge[0], candidate_edge[1], data)
+            # score_pair.append(sim_measure)
+            # print(f'Sim thresh {sim_thresh}')
+            if bn_score < sim_measure:
+                score_pair.append(True)
+            else:
+                score_pair.append(False)
+            if sim_measure > sim_thresh:   #Curvature improvment. Edge is added.
+                
+                #This is the new curvature score.
+                # improvement = calculate_curvature_experiment(data_as_graph, candidate_edge, edge)
+    
+                #Counter.
+                # edges_added += 1
+    
+                if data_as_graph.has_edge(candidate_edge[0], candidate_edge[1]) or data_as_graph.has_edge(candidate_edge[1], candidate_edge[0]):
+                    # raise Exception("Double edge add....")
+                    continue
+                #Add edge to the graph. 
+                new_edge = True
+                edges_added += 1
+                data_as_graph.add_edge(candidate_edge[0], candidate_edge[1])
+                decoder['added'].append( (candidate_edge[0], candidate_edge[1]) )
+                #Add edge to the curve score 
+                # curve_scores.add_score(candidate_edge, improvement)
+                    
+                # print(f'-----------Safety check Num edges currently::: {curve_scores.size()} ')
+                # delta += abs(improvement - worst_score )
+                if homo_stats != None:
+                    #Check if homo
+                    if data.y[candidate_edge[0]] == data.y[candidate_edge[1]]:
+                        homo_stats.append(1)
+                    else:
+                        homo_stats.append(0)
+             #Check for break
+            
+                 
+        if score_pair[0] and score_pair[1]:
+             #Remove bottleneck
+             if data_as_graph.has_edge(edge[0], edge[1]):
+                 if bn_score < sim_thresh:
+                     data_as_graph.remove_edge(edge[0], edge[1])
+                     bn_breaks += 1
+        # edge, best_score = curve_scores.get_best_score()
+    # pass
+    # print("\t\t\tCannot Add Edges!!!!!!!!!!!!!!!!!!!!1") 
+    print(f'Bottlenecks broken {bn_breaks}')
+    bump = len(add_list)
+    for ttt, edge in enumerate(remove_list):
+        
+        if math.floor( (ttt + bump)/endpos * 100) % 10 == 0:
+            print(f'{ttt + bump} of {endpos}')
+        #Will need this
+        for yyy, e in enumerate(edge):
+            #Check organizer to see if the calculation has already been done.
+            if not node_organizer.has_node_been_explored(e):
+                
+                for n in range(data.x.shape[0]):
+                    if not n == e:
+                        #Calc cosinesim, add to dictionary. This is edge indexed.
+                        node_organizer.add_score( (e, n), psuedo_labeler.calculate_score_for_single_edges(e, n, data) )
+                        # node_organizer.add_score( (e, n), torch.nn.functional.cosine_similarity(data.x[e], data.x[n], dim=0).item())
+                        # sim_scores[(e,n)] = torch.nn.functional.cosine_similarity(data.x[e], data.x[n], dim=0).item()
+            ###End score update    
+        
+        #Do remove thing.
+        if can_remove:
+            sim_measure = psuedo_labeler.calculate_score_for_single_edges(edge[0], edge[1], data)
+            # sim_thresh = r.uniform(0, .5  )
+            
+            sim_thresh = mean_sim #+ .2 * stddev
+            # print(f'Removing sim measure {sim_measure}, threshold {sim_thresh}')
+            if sim_measure < sim_thresh:
+                # print(f'\t\t\tSim is reached {sim_thresh}. Removing....')
+                if data_as_graph.degree(edge[0]) > 1 and data_as_graph.degree(edge[1]) > 1:
+                    if data_as_graph.has_edge(edge[0], edge[1]):
+                            
+                            
+                        data_as_graph.remove_edge(edge[0], edge[1])            
+                        edges_removed += 1
+                        decoder['removed'].append( (edge[0], edge[1]) )
+                            # print('\t\tEdge removed!!')
+                        #Remove Edge
+                    # curve_scores.remove_edge_score(edge)
+                    # delta += best_score
+                else:
+                        # print("$$$$$$$$$$$$$$EDGE NOT HERE$$$$$$$$")
+                        #Remove Edge
+                        # curve_scores.remove_edge_score(edge)
+                        pass
+                        # print("CANNOT REMOVE ++++ DEGREES ARE == 1")
+            else:
+                pass    
+                #Adjust score.
+                # print(f'\t\t\tCannot remove. Sim score too great.{sim_measure}, median { mean_sim} Decreasin SCORFE VALUE!!!!')
+                    # curve_scores.add_score(edge, best_score /2)
+        else:
+                # print("REMOVAL LESS THAN THRESHOLD>>>>>")
+            # pass
+            print(f'-----------Safety check on removal Num edges currently::: {curve_scores.size()} ')
+        if visualize:
+            nx.draw(data_as_graph, node_size=20)
+            plt.show()
+        # print(len(curve_scores.score_dic), data_as_graph.size())
+        # if len(curve_scores.score_dic) != data_as_graph.size():
+            # Exception("Too many removed")
+        
+        done = False #curve_scores.get_worst_score()[1] > 0
+        # return delta, edges_added, edges_removed,done, worst_score
+    return edges_added, edges_removed , decoder, bn_breaks
+        #Calculate change in curvature.            
+        # return  manipulations_list, delta
+    
 #Change to accept the organizer object
 #Changes data to graph object
 def run_epoch(data, data_as_graph, curve_scores, node_organizer, one_hop_list, psuedo_labeler, thresh = 2, visualize = False, homo_stats=None, can_add=True, can_remove=True):
@@ -1075,7 +1454,7 @@ def run_epoch(data, data_as_graph, curve_scores, node_organizer, one_hop_list, p
             for q in neighbor_list:
                 if not node_organizer.has_edge_been_explored( (e,q) ):
                     #Set a new score
-                    scr = psuedo_labeler.calculate_score_for_single_edges(e, q, data).item()
+                    scr = psuedo_labeler.calculate_score_for_single_edges(e, q, data)
                     node_organizer.add_score( (e,q), scr)
                     
             dst, sim_measure = node_organizer.get_most_similar_node_to_from_list(e, neighbor_list)
@@ -1246,7 +1625,7 @@ class OrganizerBase():
     
     #This corrects the string-key issue used as a work-around for writing to JSON.
     def add_from_JSON_file(self, dic_from_JSON):
-        print(dic_from_JSON)
+        # print(dic_from_JSON)
         for key, val in dic_from_JSON.items():
             self.score_dic[eval(key)] = val
         
@@ -1285,7 +1664,7 @@ class CurveMatrix():
 ###
 #This is a convenience class for keeping a collection of curvature scores organized.
 ###
-class EdgeScoreOrganizer(OrganizerBase):
+class EdgeScoreOrganizer_orig(OrganizerBase):
     ###
     # Constructor.
     # @Param: initial_data- List of tuples containing and edge-score pair.
@@ -1419,6 +1798,16 @@ class NodeSimilarityOrganizer(OrganizerBase):
     def __init__(self):
         super().__init__()
         self.similar_index = 0 
+        self.total_score = 0.0
+        self.counter = 0
+        
+    def get_score(self, edge):
+        if edge[0] in self.score_dic.keys():
+            if edge[1] in self.score_dic[edge[0]].keys():
+                
+                return self.score_dic[edge[0]][edge[1]]
+    
+        raise Exception(f"Missing key in {edge}")            
         
     def has_node_been_explored(self, node):
         if node in self.score_dic.keys():
@@ -1426,8 +1815,17 @@ class NodeSimilarityOrganizer(OrganizerBase):
         
         return False
     
+    def has_node_been_full_explored(self, node, data):
+        dst_list = list(self.score_dic[node])
+        
+        if data.x.shape[0] - 1 > len(dst_list):
+            return False
+        else:
+            return True
+        
     def has_edge_been_explored(self, edge):
-        e = OrganizerBase.order_edge(edge)
+        # e = OrganizerBase.order_edge(edge)
+        e = edge
         if self.has_node_been_explored(e[0]):
             if e[1] in self.score_dic[e[0]].keys():
                 return True
@@ -1467,13 +1865,18 @@ class NodeSimilarityOrganizer(OrganizerBase):
     # @Param: score- Curvature score as a float.
     ###
     def add_score(self, edge, score):
-        e = self.order_edge(edge)
+        # e = self.order_edge(edge)
+        e = edge
         if not e[0] in self.score_dic:
             self.score_dic[e[0]] = {}
             
         self.score_dic[ e[0] ][e[1]] = score
-    
+        self.total_score += score
+        self.counter += 1 
+        
     def get_mean_score(self):
+        return self.total_score / self.counter
+        #Old approach
         total, counter = 0.0, 0
         for v in self.score_dic.values():
             for subv in v.values(): 
@@ -1481,6 +1884,28 @@ class NodeSimilarityOrganizer(OrganizerBase):
                 counter += 1
                 
         return total / counter
+    #Returns a list of tuples (edge, score) ordered by score value.
+    #Param: edge_list - list of edges, assumed to be real edges.
+    def get_all_scores_ordered(self, edge_list=None):
+        temp_dic = {}
+        as_list = []
+
+        #Flatten dictionary into one level.
+        for k, v in self.score_dic.items():
+         
+                for subk, score in v.items():
+                    if edge_list == None or (k, subk) in edge_list:
+                        if k > subk:
+                            continue
+                        if type(score) == torch.tensor:
+                            score = score.item()
+                        temp_dic[(k, subk)] = score
+        
+        #Sort by value.
+        sorted_list = [( k,v ) for k, v in sorted(temp_dic.items(), key=lambda item:item[1])]
+        
+        #Check against edge_list
+        return sorted_list
     
     def get_median_score(self):
         as_list = []
@@ -1489,8 +1914,24 @@ class NodeSimilarityOrganizer(OrganizerBase):
                 as_list.append(subv)
                 
         as_list.sort()
-        return as_list[int( len(as_list)/2 )]
+        l = int(len(as_list ) * .3)
+        return as_list[int( len(as_list)/2 ) + l]
     
+    def get_stddev(self):
+        mean = self.get_mean_score()
+        running = 0.0
+        counter = 0
+        for v in self.score_dic.values():
+            for subv in v.values(): 
+                temp = subv - mean
+                running += temp * temp
+                counter += 1
+                
+        running = running / (counter - 1)
+        return math.sqrt(running)
+                
+                
+        
     def get_max_similarity(self):
         best = 0.0 
         for v in self.score_dic.values():
@@ -1510,15 +1951,44 @@ class NodeSimilarityOrganizer(OrganizerBase):
 
         return to_return 
     
-    def get_most_similar_node_to(self, node):
+    def get_most_similar_node_to(self, node, exception_list=None):
         if not node in self.score_dic.keys():
             raise Exception("Node issue in NodeSimilarityOrganizer")
-
+        
         #Reset index
         self.similar_index = 0            
-        active = self.score_dic[node]
+        active = self.score_dic[node]   #This is a dictionary.
+        
+        if exception_list != None:
+            exception_nodes = []
+            #This could be a list of nodes or a list of edges.
+            data_type = type(exception_list[0])
+
+            if data_type == int:
+                #This is fine.
+                exception_nodes = exception_list
+            elif data_type == tuple:
+                for tpl in exception_list:
+                    exception_nodes.append(tpl[0])
+                    exception_nodes.append(tpl[1])
+                    
+                exception_nodes = list(set(exception_nodes))
+                
+            elif data_type == torch.tensor:
+                for t in exception_nodes:
+                    exception_nodes.append(t.item())
+                    
+                exception_nodes = list(set(exception_nodes))
+                
+            score_copy = copy.deepcopy(active)
+            
+            for n in exception_nodes:
+                del(score_copy[n])  
+             
+            active = score_copy
+        
         best = max(active.values())
-       
+           
         ret = [key for key in active if active[key] == best]
         return ret[0], best
     
@@ -1575,3 +2045,80 @@ def calculate_homophily_ratio(data):
     ratio = homo_count/ data.edge_index.shape[1]
     return ratio.item()
 
+class EdgeScoreOrganizer(EdgeScoreOrganizer_orig):
+    ###
+    # Constructor.
+    # @Param: initial_data- List of tuples containing and edge-score pair.
+    def __init__(self, initial_data=None):
+        super().__init__()
+        self.total_score = 0.0
+        self.counter = 0
+        if initial_data != None:
+            for edge, score in initial_data:
+                self.add_score(edge, score)
+
+            
+    def size(self):
+        return len(self.score_dic)
+    ###
+    # Combines the current object with another EdgeScoreOrganizer
+    ###
+    def merge(self, outsider):
+         if outsider != None:   #This needs to be edge,score in outsider.
+            for edge, score in outsider.score_dic.items():
+                # score = outsider.get_score(edge)
+                self.add_score(edge, score)
+            
+    ###
+    # Returns True if an edge exists in the object.
+    ###
+    def edge_has_score(self, edge):
+        e = self.order_edge(edge)
+        if e in self.score_dic.keys():
+            return True
+        if (e[1], e[0]) in self.score_dic.keys():
+            return True
+        
+        return False
+    
+    ### 
+    # Returns the score for a given edge. 
+    # There is no protection against an edge not existing.
+    # Edge is a tuple
+    ###
+    def get_score(self, edge):
+        raise Exception("get_score needs to be corrected.")            
+        #Put edge in proper form
+        # e = self.order_edge(edge)
+        return self.score_dic[edge]
+    
+    ###
+    # Adds an edge and a score to the dictionary. Edges may be reformated to prevent 
+    # duplication.
+    # @Param: edge-Tuple of nodes IDs
+    # @Param: score- Curvature score as a float.
+    ###
+    def add_score(self, edge, score):
+        # e = self.order_edge(edge)
+        e = edge
+        if not e[0] in self.score_dic:
+            self.score_dic[e[0]] = {}
+            
+        self.score_dic[ e[0] ][e[1]] = score
+        self.total_score += score
+        self.counter += 1
+    ###
+    # Calculates the sum of the scores recorded.
+    ###
+    def calc_sum(self):
+       sm = sum(self.score_dic.values())
+       return sm
+   
+    ###
+    # Returns the best score and the associated edge in the form (Edge, score)
+    ###
+    def get_best_score(self):
+        best = max(self.score_dic.values())
+        ret = [key for key in self.score_dic if self.score_dic[key] == best]
+        return ( ret[0], self.score_dic[ret[0]] )
+    

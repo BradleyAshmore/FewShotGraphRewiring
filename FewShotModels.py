@@ -261,18 +261,39 @@ class FNN(nn.Module):
         x = self.linear2(F.relu(x))
         return x
 
+# class GCN(nn.Module):
+#     def __init__(self, in_features, out_features):
+#         super(GCN, self).__init__()
+#         self.conv1 = GCNConv(in_features, 16)
+#         # torch.nn.init.normal_(self.conv1.lin.weight, mean=0, std=0.3)
+#         # torch.nn.init.normal_(self.conv1.lin.bias, mean=0, std=0.01)
+#         self.conv2 = GCNConv(16, out_features)
+#         self.dl = nn.Dropout(p=0.3)
+#     def forward(self, x, adj):
+#         x = self.dl(x)
+#         x = self.conv1(x, adj)
+        
+#         x = torch.nn.functional.relu(x)
+#         x = self.conv2(x, adj)
+#         return x
 class GCN(nn.Module):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features ):
         super(GCN, self).__init__()
-        self.conv1 = GCNConv(in_features, 24)
+        hidden = 16
+        self.conv1 = GCNConv(in_features, hidden)
         # torch.nn.init.normal_(self.conv1.lin.weight, mean=0, std=0.3)
         # torch.nn.init.normal_(self.conv1.lin.bias, mean=0, std=0.01)
-        self.conv2 = GCNConv(24, out_features)
-
+        self.conv2 = GCNConv(hidden, out_features)
+        
     def forward(self, x, adj):
+
         x = self.conv1(x, adj)
-        x = torch.nn.functional.relu(x)
+        # x = self.bn(x)
+        x = F.relu(x)
+        x = F.dropout(x, 0.5, training = self.training)
+         
         x = self.conv2(x, adj)
+        x = F.log_softmax(x, dim=1)
         return x
 
 ###############################End of models
