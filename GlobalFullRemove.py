@@ -5,12 +5,6 @@ Created on Sun Sep 29 19:45:30 2024
 @author: ashmo
 Global approach that evaluates all edges for removal.
 """
-
-
-
-
-
-
 # Imports
 
 import math
@@ -61,9 +55,10 @@ def run_rewire_two(args, data, data_as_graph, curve_scores, node_organizer, one_
     print("Setting add and remove lists.")
     st = time.time() 
     for key, value in curve_scores.score_dic.items():
-        if value < -1:
+        print(f'k: {key}, v: {value}')
+        if value < 100:
             add_list.append(key)
-        if  value > 200:
+        if  value > 500:
             # value_stats.append(value)
             remove_list.append(key)
             # pass
@@ -350,7 +345,7 @@ f.write(f'\n\n\nThis ,is ,a ,new ,set ,of ,iterations,-,-,-,-,-,-,-,-,-,-,-,-,-,
 f.close()
 
 if args.dataset == 'toniot':
-    base_curve_score_file = f'{args.dataset}_graph_{args.graph_num}_original_graph_curve_scores.json'
+    base_curve_score_file = f'{args.dataset}_graph_{args.graph_num+1}_original_graph_curve_scores.json'
 else:
     base_curve_score_file = f'{args.dataset}_original_graph_curve_scores.json'
 
@@ -376,9 +371,9 @@ seed_list = [random.randint(0, 9999999) for i in range(10)]
 data = load_dataset_from_args(args)
 
 
-mean, stddev, rep_results, acc_res_matrix = gcn_eval(data, args=args, seed_list=seed_list, verbose=args.verbose, new_labels=True)
+mean, stddev, rep_results, acc_res_matrix = gcn_eval(data, args=args, seed_list=seed_list, verbose=args.verbose, new_labels=True, reps=3)
 vanilla_results.append( rep_results)
-print(f'Overall {mean} +/- {stddev}')
+print(f'Average F-1: {mean} +/- {stddev}')
 og_score = mean
 
 
@@ -422,12 +417,12 @@ for rep in range(args.repetitions):
     graph_object = to_networkx(data, to_undirected=True)
     print('Setting adjacency.')
     data.edge_index = from_networkx(graph_object).edge_index
-    psuedo_labeler = SimilarityScoreCalculator(args, data, data.few_shot_mask, epochs=2000)
+    psuedo_labeler = SimilarityScoreCalculator(args, data, data.few_shot_mask, epochs=20)
     
     # sim_scores = psuedo_labeler.set_scores_from_edges(data)
      
-    all_curve_scores = curve_scores
-    node_scores = NodeSimilarityOrganizer()
+    # all_curve_scores = curve_scores
+    # node_scores = NodeSimilarityOrganizer()
     # sim_scores = psuedo_labeler.set_scores_from_edges(data)
     print("Cycling through all nodes")
     start = time.time()
@@ -590,7 +585,7 @@ for rep in range(args.repetitions):
         homo_measure = [0]
     print(f'\nPercent homo added {sum(homo_measure)/len(homo_measure)}')
     # print(f'\nHistory of removed edges {remove_list}')
-    print(f'\n\nFinal results:\n\tOrigianal Acc: {og_score}')
+    print(f'\n\nFinal results:\n\tOrigianal F-1: {og_score}')
     print("\n\n")
     print(result_list)
 
@@ -617,7 +612,7 @@ for rep in range(args.repetitions):
     # f = open(fn, 'a')
     # f.write('\tClassification of oversampled Graph: ,')
     # f.write(str(mean) + ",+/-," + str(stddev))
-    f.write(',\nRewired Accuracy ,\n')
+    f.write(',\nRewired F-1 ,\n')
     f.close()
     
     f = open(fn, 'a')
@@ -648,8 +643,8 @@ for rep in range(args.repetitions):
     f.write('\nIteration Results::::\n ,')
     
     f.write("\n Overall Averages:, ,\n")
-    f.write("Vanilla Average:      ," + str(van_master.mean().item() *  100) + ", +/- ," + str(van_devs.mean().item()    * 100) + "\n")
-    f.write("Rewire Grand Average: ," + str(master_list.mean().item() * 100) + ", +/- ," + str(master_devs.mean().item() * 100) + "\n")
+    f.write("Vanilla F-1 Average:      ," + str(van_master.mean().item() *  100) + ", +/- ," + str(van_devs.mean().item()    * 100) + "\n")
+    f.write("Rewire Grand F-1 Average: ," + str(master_list.mean().item() * 100) + ", +/- ," + str(master_devs.mean().item() * 100) + "\n")
      
     f.write('\n_____,_____,_____,_____,_____,_____,_____,\n\n')
     f.close()

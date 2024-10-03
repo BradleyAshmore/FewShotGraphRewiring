@@ -2099,12 +2099,9 @@ class EdgeScoreOrganizer(EdgeScoreOrganizer_orig):
     # @Param: score- Curvature score as a float.
     ###
     def add_score(self, edge, score):
-        # e = self.order_edge(edge)
-        e = edge
-        if not e[0] in self.score_dic:
-            self.score_dic[e[0]] = {}
-            
-        self.score_dic[ e[0] ][e[1]] = score
+        e = self.order_edge(edge)
+      
+        self.score_dic[ e] = score
         self.total_score += score
         self.counter += 1
     ###

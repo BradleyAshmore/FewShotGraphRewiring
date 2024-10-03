@@ -20,6 +20,7 @@ from numpy.random import default_rng
 import torch.functional as F
 import matplotlib.pyplot as plt
 import random
+from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 
 import DataProcessor as DP
 import NetworkDataset
@@ -54,6 +55,7 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
         y_max = int(y_max.item())
     
     acc_results = []
+    f_train_history = []
     # acc_res_matrix = []
     for r in range(reps): 
         training_results = []
@@ -80,16 +82,35 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
     
             train_loss.backward(retain_graph=True)
             op.step()
-            preds = nn.functional.softmax(out[data.test_mask]).argmax(dim=1)
-            correct = (preds == data.y[data.test_mask]).sum()
-            acc = correct / preds.shape[0]
-            training_results.append(acc)
+            # preds = nn.functional.softmax(out[data.test_mask]).argmax(dim=1)
+            # correct = (preds == data.y[data.test_mask]).sum()
+            # acc = correct / preds.shape[0]
+            pred = out.argmax(dim=1).clone()
+            pred_train = pred[data.few_shot_mask].detach().numpy()
+            lbl_train = data.y[data.few_shot_mask].clone().detach().numpy()
+            
+            f_train = f1_score(lbl_train, pred_train)
+            f_train_history.append(f_train)
+            pred = out[data.test_mask].argmax(dim=1).clone().detach().numpy()
+            lbl = data.y[data.test_mask].clone().detach().numpy()
+            acc = accuracy_score(lbl, pred)
+            f = f1_score(lbl, pred)
+            p = precision_score(lbl, pred)
+            rec = recall_score(lbl, pred)
+            
+            training_results.append(( acc, p, rec, f) )
             if verbose:
                 print(f'GCN Epoch {i} Training loss {train_loss.item()}, Best Acc {best_acc}, acc {acc}')
                 
-            if best_acc < acc:
-                best_acc = acc
-                best_model_state = model.state_dict()
+            # if best_acc < acc:
+            #     best_acc = acc
+            #     best_model_state = model.state_dict()
+            
+            
+            
+            #modifying for f-1
+            if best_acc < f:
+                best_acc = f
                 # acc = correct / preds.shape[0]
                 # print(f'\tTest results: Acc {acc}')
         # plt.plot(training_results)
@@ -103,6 +124,7 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
     # return (sum(acc_results)/len(acc_results), best_model_state)
     # acc_res_matrix.append(acc_results)
     print(f'Results from all reps: \n\t{acc_results}\n')
+    print(f'F1 history for training: \n{f_train_history}')
     arr = np.array(acc_results)
     mean = arr.mean()
     stddev = arr.std()
@@ -228,7 +250,7 @@ def load_dataset_from_args(args):
         data = data.to(device)
     elif args.dataset.lower() == 'toniot':
         dataset = NetworkDataset.NetworkDataset()
-        data = dataset[args.graph_num]
+        data = dataset[args.graph_num+1]
         data = data.to(device)
     #Remove self loops
     self_loops = torch.where(data.edge_index[0,:] == data.edge_index[1,:])[0]
@@ -243,6 +265,7 @@ def load_dataset_from_args(args):
         #Add the tail
         new_edge_index = torch.cat( (new_edge_index, data.edge_index[:, self_loops[c-1]+1:]) , dim=1)
     data.few_shot_idx, data.few_shot_mask = set_few_shot_labels(data, args)
-    data.few_shot_mask = data.train_mask
+    # data.train_idx= data.few_shot_idx
+    # data.few_shot_mask = data.train_mask
     print("Data loaded....")
     return data

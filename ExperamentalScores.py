@@ -117,16 +117,16 @@ def train_mlp(args, model, data_in, test_mask_pointer, data_test, epochs):
     #For debuggin purposes.
     test_acc_progress = []
     
-    file_name = ".\\savedmodedfor" + args.dataset.lower() + "ShotSize_" + str(args.shot_size) + ".mdl"
-    # file_name = ".\\savedmodelfortexas.mdl"
-    if os.path.isfile(file_name) and 1 == 0:
-        model.load_state_dict(torch.load(file_name))
-        model.eval()
-        y_bar = model(data_train.x)
-        # test_acc  = (F.sigmoid(y_bar[data_test.val_mask]).argmax(dim=1) == data_test.y[data.val_mask]).sum() / sum(data.val_mask)
-        test_acc  = (F.sigmoid(y_bar[data_test.test_mask]).argmax(dim=1) == data_test.y[data.test_mask]).sum() / sum(data.test_mask)
-        torch.save(model.state_dict(), file_name) 
-        return model, test_acc
+    # file_name = ".\\savedmodedfor" + args.dataset.lower() + "ShotSize_" + str(args.shot_size) + ".mdl"
+    # # file_name = ".\\savedmodelfortexas.mdl"
+    # if os.path.isfile(file_name) and 1 == 0:
+    #     model.load_state_dict(torch.load(file_name))
+    #     model.eval()
+    #     y_bar = model(data_train.x)
+    #     # test_acc  = (F.sigmoid(y_bar[data_test.val_mask]).argmax(dim=1) == data_test.y[data.val_mask]).sum() / sum(data.val_mask)
+    #     test_acc  = (F.sigmoid(y_bar[data_test.test_mask]).argmax(dim=1) == data_test.y[data.test_mask]).sum() / sum(data.test_mask)
+    #     torch.save(model.state_dict(), file_name) 
+    #     return model, test_acc
     #Set optimizer, etc. 
     optim = torch.optim.Adam(model.parameters(), lr=0.001)
     loss = nn.CrossEntropyLoss()
@@ -179,9 +179,9 @@ def train_mlp(args, model, data_in, test_mask_pointer, data_test, epochs):
             test_acc  = (F.sigmoid(y_bar[data_test.test_mask]).argmax(dim=1) == data_test.y[data_test.test_mask]).sum() / sum(data_test.test_mask)
             print(f'\tValidation Test at epoch {epoch:4d} val loss: {test_loss:4f}, val acc: {test_acc:4f}')
     
-    torch.save(saved_model, file_name)
+    # torch.save(saved_model, file_name)
     #Reload model
-    model.load_state_dict(saved_model)
+    # model.load_state_dict(saved_model)
     model.eval()
     y_bar = model(data_test.x)
     test_acc  = (F.sigmoid(y_bar[data_test.test_mask]).argmax(dim=1) == data_test.y[data_test.test_mask]).sum() / sum(data_test.test_mask)
