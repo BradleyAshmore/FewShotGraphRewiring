@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv
-from torch_sparse import SparseTensor, matmul
+# from torch_sparse import SparseTensor, matmul
 import math
 
 #####Models
@@ -86,126 +86,126 @@ class MLP_generator(nn.Module):
 
 
 
-class NodeAndStructureEncoder(nn.Module):
-    def __init__(self, feature_in_dim, num_nodes, hidden_dim, latent_dim):
-        super(NodeAndStructureEncoder, self).__init__()
+# class NodeAndStructureEncoder(nn.Module):
+#     def __init__(self, feature_in_dim, num_nodes, hidden_dim, latent_dim):
+#         super(NodeAndStructureEncoder, self).__init__()
         
-        self.layerX = MLP(1,feature_in_dim, hidden_dim, hidden_dim)
-        self.layerA = MLP(1, num_nodes, hidden_dim, hidden_dim)
-        self.layerCombine = MLP(1, hidden_dim * 2, latent_dim, latent_dim)
-        self.bn1 = nn.BatchNorm1d(hidden_dim, hidden_dim)
-        self.bn2 = nn.BatchNorm1d(latent_dim,latent_dim)
-        self.mean_layer = MLP(1, latent_dim, latent_dim, latent_dim)
-        self.std_layer = MLP(1, latent_dim, latent_dim, latent_dim)
+#         self.layerX = MLP(1,feature_in_dim, hidden_dim, hidden_dim)
+#         self.layerA = MLP(1, num_nodes, hidden_dim, hidden_dim)
+#         self.layerCombine = MLP(1, hidden_dim * 2, latent_dim, latent_dim)
+#         self.bn1 = nn.BatchNorm1d(hidden_dim, hidden_dim)
+#         self.bn2 = nn.BatchNorm1d(latent_dim,latent_dim)
+#         self.mean_layer = MLP(1, latent_dim, latent_dim, latent_dim)
+#         self.std_layer = MLP(1, latent_dim, latent_dim, latent_dim)
         
-        self.leakyrelu = F.leaky_relu
-        self.num_nodes = num_nodes
-        self.GCN1 = GCN(feature_in_dim, hidden_dim)
-        self.GCN2 = GCN(hidden_dim, latent_dim)
+#         self.leakyrelu = F.leaky_relu
+#         self.num_nodes = num_nodes
+#         self.GCN1 = GCN(feature_in_dim, hidden_dim)
+#         self.GCN2 = GCN(hidden_dim, latent_dim)
         
-    def forward(self, X, A):
-        m = self.num_nodes #X.shape[0]
-        X_hat = self.layerX(X)
-        X_hat = self.leakyrelu(X_hat)
-        row, col = A
-        A_hat = SparseTensor(row=row, col=col, sparse_sizes=(m, m) ).to_torch_sparse_coo_tensor()
+#     def forward(self, X, A):
+#         m = self.num_nodes #X.shape[0]
+#         X_hat = self.layerX(X)
+#         X_hat = self.leakyrelu(X_hat)
+#         row, col = A
+#         A_hat = SparseTensor(row=row, col=col, sparse_sizes=(m, m) ).to_torch_sparse_coo_tensor()
 
-        A_hat = self.layerA(A_hat)
-        A_hat = self.leakyrelu(A_hat)
+#         A_hat = self.layerA(A_hat)
+#         A_hat = self.leakyrelu(A_hat)
         
-        concatenated_data = torch.cat( (X_hat, A_hat), dim=1 )
-        concatenated_data = self.layerCombine(concatenated_data)
-        # X_hat = self.GCN1(X,A)
-        # X_hat - self.leakyrelu(X_hat)
-        # concatenated_data = self.GCN2(X_hat, A)
-        concatenated_data = self.leakyrelu(concatenated_data)
-        # concatenated_data = self.bn2(concatenated_data)
+#         concatenated_data = torch.cat( (X_hat, A_hat), dim=1 )
+#         concatenated_data = self.layerCombine(concatenated_data)
+#         # X_hat = self.GCN1(X,A)
+#         # X_hat - self.leakyrelu(X_hat)
+#         # concatenated_data = self.GCN2(X_hat, A)
+#         concatenated_data = self.leakyrelu(concatenated_data)
+#         # concatenated_data = self.bn2(concatenated_data)
         
-        mean = self.mean_layer(concatenated_data)
-        std = self.std_layer(concatenated_data)
+#         mean = self.mean_layer(concatenated_data)
+#         std = self.std_layer(concatenated_data)
         
-        return concatenated_data, mean, std
+#         return concatenated_data, mean, std
         
 #This is an autoencoder that accepts both node information and structural information.
 #Node features and strucutre data is fed to independent MLPs before being combined
 #to allow for heterophily considerations. 
 #Only node freatres are reconstructed.
-class NodeAndStructureVariationalAutoEncoder(nn.Module):
-    def __init__(self, features_in_dim, num_nodes, hidden_dim, latent_dim = 2):
-        super(NodeAndStructureVariationalAutoEncoder, self).__init__() 
-        self.encoder = NodeAndStructureEncoder(features_in_dim, num_nodes, hidden_dim, latent_dim)
+# class NodeAndStructureVariationalAutoEncoder(nn.Module):
+#     def __init__(self, features_in_dim, num_nodes, hidden_dim, latent_dim = 2):
+#         super(NodeAndStructureVariationalAutoEncoder, self).__init__() 
+#         self.encoder = NodeAndStructureEncoder(features_in_dim, num_nodes, hidden_dim, latent_dim)
         
-        self.decoder = NodeDecoder(features_in_dim, hidden_dim, latent_dim=latent_dim)
+#         self.decoder = NodeDecoder(features_in_dim, hidden_dim, latent_dim=latent_dim)
         
-        self.out_dim = features_in_dim
+#         self.out_dim = features_in_dim
 
-    def reparamiterize(self, mean, var):
-        epsilon = torch.randn_like(var)
-        Z = mean + var * epsilon
-        return Z
+#     def reparamiterize(self, mean, var):
+#         epsilon = torch.randn_like(var)
+#         Z = mean + var * epsilon
+#         return Z
 
-    def forward(self, X, edge_index, reparamiterize = True):
+#     def forward(self, X, edge_index, reparamiterize = True):
       
-        # Encode into a distribution.
-        # mu, sig, X_enc  = self.encoder(X_0, edge_index)
-        mu, sig, X_enc = self.encoder(X, edge_index)
+#         # Encode into a distribution.
+#         # mu, sig, X_enc  = self.encoder(X_0, edge_index)
+#         mu, sig, X_enc = self.encoder(X, edge_index)
   
-        # Reparameterize distribution.
-        if reparamiterize:
-            Z = self.reparamiterize(mu, sig)
-        else:
-            Z = X_enc
+#         # Reparameterize distribution.
+#         if reparamiterize:
+#             Z = self.reparamiterize(mu, sig)
+#         else:
+#             Z = X_enc
 
-        # Decode nodes
-        X_1 = self.decoder(Z, edge_index)
+#         # Decode nodes
+#         X_1 = self.decoder(Z, edge_index)
 
-        # Saving X_1 incase it is needed for debugging in the future.
-        X_1 = F.relu(X_1)
+#         # Saving X_1 incase it is needed for debugging in the future.
+#         X_1 = F.relu(X_1)
 
-        return X_1, mu, sig  #, neighbors, n_loss
+#         return X_1, mu, sig  #, neighbors, n_loss
         
-class NodeOnlyVariationalAutoEncoder(nn.Module):
-    def __init__(self, in_dim, hidden_dim,  latent_dim=2):
+# class NodeOnlyVariationalAutoEncoder(nn.Module):
+#     def __init__(self, in_dim, hidden_dim,  latent_dim=2):
 
-        super(NodeOnlyVariationalAutoEncoder, self).__init__()
+#         super(NodeOnlyVariationalAutoEncoder, self).__init__()
 
-        self.encoder = NodeEncoder(
-            in_dim,  hidden_dim,  latent_dim=latent_dim)
+#         self.encoder = NodeEncoder(
+#             in_dim,  hidden_dim,  latent_dim=latent_dim)
 
-        self.decoder = NodeDecoder(
-            in_dim, hidden_dim,  latent_dim=latent_dim)
+#         self.decoder = NodeDecoder(
+#             in_dim, hidden_dim,  latent_dim=latent_dim)
 
-        self.out_dim = in_dim
-    def reparamiterize(self, mean, var):
-        epsilon = torch.randn_like(var)
-        Z = mean + var * epsilon
-        return Z
+#         self.out_dim = in_dim
+#     def reparamiterize(self, mean, var):
+#         epsilon = torch.randn_like(var)
+#         Z = mean + var * epsilon
+#         return Z
 
-    def forward(self, X, edge_index, reparamiterize = True):
-        # Reduce dimension.
-        # X_0 = self.mlp0(X)
+#     def forward(self, X, edge_index, reparamiterize = True):
+#         # Reduce dimension.
+#         # X_0 = self.mlp0(X)
 
-        # Encode into a distribution.
-        # mu, sig, X_enc  = self.encoder(X_0, edge_index)
-        mu, sig, X_enc = self.encoder(X, edge_index)
+#         # Encode into a distribution.
+#         # mu, sig, X_enc  = self.encoder(X_0, edge_index)
+#         mu, sig, X_enc = self.encoder(X, edge_index)
   
-        # Reparameterize distribution.
-        if reparamiterize:
-            Z = self.reparamiterize(mu, sig)
-        else:
-            Z = X_enc
+#         # Reparameterize distribution.
+#         if reparamiterize:
+#             Z = self.reparamiterize(mu, sig)
+#         else:
+#             Z = X_enc
 
-        # Decode nodes
-        X_1 = self.decoder(Z, edge_index)
+#         # Decode nodes
+#         X_1 = self.decoder(Z, edge_index)
 
-        # Saving X_1 incase it is needed for debugging in the future.
-        X_1 = F.relu(X_1)
+#         # Saving X_1 incase it is needed for debugging in the future.
+#         X_1 = F.relu(X_1)
 
-        # Back to full vector size
-        # X_hat = self.mlp_back(X_1)
-        # X_hat = F.relu(X_hat)
-        # neighbors, n_loss = self.decode(Z, X_enc)
-        return X_1, mu, sig  #, neighbors, n_loss
+#         # Back to full vector size
+#         # X_hat = self.mlp_back(X_1)
+#         # X_hat = F.relu(X_hat)
+#         # neighbors, n_loss = self.decode(Z, X_enc)
+#         return X_1, mu, sig  #, neighbors, n_loss
  
 
        

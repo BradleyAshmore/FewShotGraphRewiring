@@ -205,7 +205,7 @@ class SimilarityScoreCalculator():
         self.no_label_matches = 0
         #Create MLP
         self.model = MLP(data.x.shape[1], data.y.max()+1)
-      
+        self.model.to(args.device)
         #Determine what labels to use.
         if args.shot_size < 1:  #Use default training set.
             self.train_mask_pointer = data.train_mask
