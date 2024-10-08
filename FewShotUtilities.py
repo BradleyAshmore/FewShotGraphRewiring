@@ -56,13 +56,18 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
     
     acc_results = []
     f_train_history = []
+    precision_results = []
+    recall_results = []
     # acc_res_matrix = []
     for r in range(reps): 
         training_results = []
         best_loss = 9999
         best_acc = 0.0
+        precision = 0
+        recall = 0
         acc = 0.0
         model = GCN(data.x.shape[1], y_max)
+        model.to(args.device)
         # model.init()
         op = optim.Adam(model.parameters(), lr=0.01, weight_decay=5e-4)
         loss = nn.NLLLoss() #nn.CrossEntropyLoss()
@@ -85,18 +90,18 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
             # preds = nn.functional.softmax(out[data.test_mask]).argmax(dim=1)
             # correct = (preds == data.y[data.test_mask]).sum()
             # acc = correct / preds.shape[0]
-            pred = out.argmax(dim=1).clone()
-            pred_train = pred[data.few_shot_mask].detach().numpy()
-            lbl_train = data.y[data.few_shot_mask].clone().detach().numpy()
+            pred = out.argmax(dim=1)
+            pred_train = pred[data.few_shot_mask]
+            lbl_train = data.y[data.few_shot_mask]
             
-            f_train = f1_score(lbl_train, pred_train)
+            p_t, r_t, f_train = f1(lbl_train, pred_train, as_labels=True)
             f_train_history.append(f_train)
-            pred = out[data.test_mask].argmax(dim=1).clone().detach().numpy()
-            lbl = data.y[data.test_mask].clone().detach().numpy()
-            acc = accuracy_score(lbl, pred)
-            f = f1_score(lbl, pred)
-            p = precision_score(lbl, pred)
-            rec = recall_score(lbl, pred)
+            pred = out[data.test_mask].argmax(dim=1)
+            lbl = data.y[data.test_mask]
+            acc = accuracy(pred, lbl) 
+            p, rec, f = f1(lbl, pred, as_labels=True)
+            # p = binary_precision(lbl, pred)
+            # rec = binary_recall(lbl, pred)
             
             training_results.append(( acc, p, rec, f) )
             if verbose:
@@ -111,24 +116,28 @@ def gcn_eval(data, args = None, seed_list=None, verbose = False, reps = 10, new_
             #modifying for f-1
             if best_acc < f:
                 best_acc = f
+                precision = p
+                recall = rec
                 # acc = correct / preds.shape[0]
                 # print(f'\tTest results: Acc {acc}')
         # plt.plot(training_results)
         # plt.title(f'GCN Eval repetition {r}')
         # plt.show()
         acc_results.append(best_acc)
+        precision_results.append(precision)
+        recall_results.append(recall)
         del (loss)
         del (op)
         del (model)
         del (train_loss)
     # return (sum(acc_results)/len(acc_results), best_model_state)
     # acc_res_matrix.append(acc_results)
-    print(f'Results from all reps: \n\t{acc_results}\n')
-    print(f'F1 history for training: \n{f_train_history}')
+    # print(f'Results from all reps: \n\t{acc_results}\n')
+    # print(f'F1 history for training: \n{f_train_history}')
     arr = np.array(acc_results)
     mean = arr.mean()
     stddev = arr.std()
-    return mean, stddev, acc_results, best_model_state
+    return mean, stddev, acc_results, precision_results, recall_results
     # return acc_results    
 
 '''
@@ -269,3 +278,52 @@ def load_dataset_from_args(args):
     # data.few_shot_mask = data.train_mask
     print("Data loaded....")
     return data
+
+
+
+def accuracy(preds, labels):   #shoudl this be min???
+    # preds = output.max(1)[1].type_as(labels)
+    # preds = output.min(1)[1].type_as(labels)
+    correct = preds.eq(labels).double()
+    correct = correct.sum()
+    return correct / len(labels)
+
+def f1(output, labels, as_labels = False):
+    if as_labels:
+        preds = output
+    else:
+        preds = output.max(1)[1].type_as(labels)
+        # preds = output.min(1)[1].type_as(labels) 
+    correct = preds.eq(labels).double()
+    incorrect = (correct == 0).double()
+    trues = (labels == 1)
+    negatives = (labels == 0)
+    
+    tps = sum(correct[trues] ) #.item()
+    fns = sum(incorrect[trues] ) #.item()
+    
+    fps = sum(incorrect[negatives] ) #.item()
+    tns = sum(correct[negatives] ) #.item()
+    # print(tps, fns, fps, tns)
+    # print("Total: " + str(tps + fns + fps + tns))
+    if tps == 0 and fps == 0:
+        p = 0
+    else:
+        p = tps/(tps + fps)
+        
+    if tps == 0 and fns == 0:
+        r = 0
+    else:
+        r = tps/ (tps + fns)
+        
+    if p == 0 and r == 0 :
+        fone =0
+    else:
+        fone = 2 / (1/r + 1/p)
+    if type(p) == torch.Tensor:
+        p = p.item()
+    if type(r) == torch.Tensor: 
+        r = r.item()
+    if type(fone) == torch.Tensor:
+        fone = fone.item()
+    return p, r, fone
